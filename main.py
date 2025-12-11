@@ -26,15 +26,18 @@ FACE_MESH = mp_face_mesh.FaceMesh(
 def authenticate_drive():
     gauth = GoogleAuth()
     
-    # Use OAuth Web App credentials from st.secrets
-    gauth.DEFAULT_SETTINGS['client_config'] = {
-        "client_id": st.secrets["gdrive_oauth"]["client_id"],
-        "client_secret": st.secrets["gdrive_oauth"]["client_secret"],
-        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-        "token_uri": "https://oauth2.googleapis.com/token"
+    # Setup credentials manually using st.secrets
+    gauth.DEFAULT_SETTINGS = {
+        "client_config_backend": "settings",
+        "client_config": {
+            "client_id": st.secrets["gdrive_oauth"]["client_id"],
+            "client_secret": st.secrets["gdrive_oauth"]["client_secret"],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token"
+        }
     }
     
-    gauth.LocalWebserverAuth()  # Opens auth link for user
+    gauth.LocalWebserverAuth()  # opens OAuth link for user in browser
     drive = GoogleDrive(gauth)
     return drive
 
