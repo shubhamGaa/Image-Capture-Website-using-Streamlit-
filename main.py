@@ -26,18 +26,21 @@ FACE_MESH = mp_face_mesh.FaceMesh(
 # -------------------------- GOOGLE DRIVE --------------------------
 def upload_to_gdrive(image_pil, filename):
     """Upload PIL image to Google Drive using Service Account"""
-    # Load credentials from Streamlit secrets
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaIoBaseUpload
+    import io
+
     creds = service_account.Credentials.from_service_account_info(st.secrets["gdrive"])
     service = build("drive", "v3", credentials=creds)
 
-    # Convert image to bytes
     img_bytes = io.BytesIO()
     image_pil.save(img_bytes, format="JPEG")
     img_bytes.seek(0)
 
     file_metadata = {
         "name": filename,
-        "parents": [st.secrets["drive_folder_id"]]  # folder ID from secrets
+        "parents": [st.secrets["gdrive"]["drive_folder_id"]]
     }
 
     media = MediaIoBaseUpload(img_bytes, mimetype="image/jpeg")
@@ -48,7 +51,8 @@ def upload_to_gdrive(image_pil, filename):
         fields="id"
     ).execute()
 
-    return uploaded_file.get("id")
+    return uploaded_file.get("id")  # Only return string
+
 
 # -------------------------- HELPER FUNCTIONS --------------------------
 def create_folder(name):
