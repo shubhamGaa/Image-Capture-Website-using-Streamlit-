@@ -4,10 +4,9 @@ import numpy as np
 from PIL import Image
 from datetime import datetime
 import os
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
 import io
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
 
 # -------------------------- CONFIG --------------------------
 DATASET_FOLDER = "dataset"
@@ -23,40 +22,24 @@ FACE_MESH = mp_face_mesh.FaceMesh(
     min_tracking_confidence=0.6
 )
 
-# -------------------------- GOOGLE DRIVE --------------------------
-def upload_to_gdrive(image_pil, filename):
-    """Upload PIL image to Google Drive using Service Account"""
-    from google.oauth2 import service_account
-    from googleapiclient.discovery import build
-    from googleapiclient.http import MediaIoBaseUpload
-    import io
-
-    creds = service_account.Credentials.from_service_account_info(st.secrets["gdrive"])
-    service = build("drive", "v3", credentials=creds)
-
-    img_bytes = io.BytesIO()
-    image_pil.save(img_bytes, format="JPEG")
-    img_bytes.seek(0)
-
-    file_metadata = {
-        "name": filename,
-        "parents": [st.secrets["gdrive"]["drive_folder_id"]]
+# -------------------------- GOOGLE DRIVE AUTH --------------------------
+def authenticate_drive():
+    gauth = GoogleAuth()
+    
+    # Use OAuth Web App credentials from st.secrets
+    gauth.DEFAULT_SETTINGS['client_config'] = {
+        "client_id": st.secrets["gdrive_oauth"]["client_id"],
+        "client_secret": st.secrets["gdrive_oauth"]["client_secret"],
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token"
     }
-
-    media = MediaIoBaseUpload(img_bytes, mimetype="image/jpeg")
-
-    uploaded_file = service.files().create(
-        body=file_metadata,
-        media_body=media,
-        fields="id"
-    ).execute()
-
-    return uploaded_file.get("id")  # Only return string
-
+    
+    gauth.LocalWebserverAuth()  # Opens auth link for user
+    drive = GoogleDrive(gauth)
+    return drive
 
 # -------------------------- HELPER FUNCTIONS --------------------------
 def create_folder(name):
-    """Creates dataset folder for each person locally"""
     if not os.path.exists(DATASET_FOLDER):
         os.makedirs(DATASET_FOLDER)
     safe_name = name.replace(" ", "_").strip().lower()
@@ -66,7 +49,6 @@ def create_folder(name):
     return person_folder, safe_name
 
 def save_image_locally(person_name, person_folder, image_data):
-    """Save PIL image to local dataset folder"""
     pil_image = Image.open(image_data)
     current_files = [f for f in os.listdir(person_folder) if f.endswith('.jpg')]
     photo_count = len(current_files) + 1
@@ -77,23 +59,28 @@ def save_image_locally(person_name, person_folder, image_data):
     st.session_state['photo_count'] = photo_count
     return filename, pil_image
 
+def upload_to_drive(pil_image, filename, drive):
+    img_bytes = io.BytesIO()
+    pil_image.save(img_bytes, format="JPEG")
+    img_bytes.seek(0)
+    
+    file_drive = drive.CreateFile({'title': filename})
+    file_drive.SetContentFile(img_bytes)
+    file_drive.Upload()
+    return file_drive['id']
+
 def check_side_angle(landmarks):
-    """Returns True if face is looking forward (not too side turned)"""
     LEFT_EYE = 33
     RIGHT_EYE = 263
     NOSE_TIP = 1
-
     lx = landmarks[LEFT_EYE].x
     rx = landmarks[RIGHT_EYE].x
     nx = landmarks[NOSE_TIP].x
-
     eye_center = (lx + rx) / 2
     offset_ratio = abs(nx - eye_center) / abs(lx - rx)
-
     return offset_ratio <= MAX_SIDE_OFFSET
 
 def draw_landmarks(image, landmarks):
-    """Draw Mediapipe face landmarks"""
     h, w = image.shape[:2]
     for lm in landmarks:
         x, y = int(lm.x * w), int(lm.y * h)
@@ -101,8 +88,8 @@ def draw_landmarks(image, landmarks):
     return image
 
 # -------------------------- STREAMLIT UI --------------------------
-st.set_page_config(page_title="Dataset Capture with Mediapipe + Drive")
-st.title("👤 Dataset Capture Portal (Mediapipe + Google Drive)")
+st.set_page_config(page_title="Dataset Capture + Google Drive")
+st.title("👤 Dataset Capture Portal (Mediapipe + OAuth Drive)")
 st.markdown("---")
 
 # Session state
@@ -110,7 +97,7 @@ for key in ['person_name', 'photo_count', 'person_safe_name']:
     if key not in st.session_state:
         st.session_state[key] = ""
 
-# -------------------------- STEP 1: Enter Name --------------------------
+# STEP 1: Enter Name
 st.subheader("1. Identify Person")
 new_name = st.text_input("Enter Full Name")
 
@@ -121,12 +108,8 @@ if new_name and new_name != st.session_state.get('last_name', ''):
     st.session_state['person_safe_name'] = safe_name
     st.session_state['last_name'] = new_name
     st.info(f"Ready to capture **{new_name}**.")
-elif not new_name:
-    st.warning("Please enter a name to continue.")
 
-st.markdown("---")
-
-# -------------------------- STEP 2: Capture --------------------------
+# STEP 2: Webcam Capture
 if st.session_state['person_name']:
     count = st.session_state['photo_count']
     status = f"Captured: {count} / {MAX_PHOTOS_PER_PERSON}"
@@ -137,7 +120,6 @@ if st.session_state['person_name']:
     else:
         st.write(f"**Status:** {status}")
         captured_img = st.camera_input("Capture Image")
-
         if captured_img is not None:
             pil = Image.open(captured_img)
             img_rgb = np.array(pil)
@@ -149,7 +131,6 @@ if st.session_state['person_name']:
             else:
                 face_landmarks = results.multi_face_landmarks[0].landmark
 
-                # Side angle check
                 if not check_side_angle(face_landmarks):
                     st.warning("⚠️ Face is turned too much sideways. Look straight.")
                 else:
@@ -164,15 +145,15 @@ if st.session_state['person_name']:
 
                     # Upload to Google Drive
                     try:
-                        file_id = upload_to_gdrive(pil_img, filename)
-                        st.success(f"✅ Saved locally and uploaded to Google Drive! File ID: {file_id}")
+                        drive = authenticate_drive()
+                        file_id = upload_to_drive(pil_img, filename, drive)
+                        st.success(f"✅ Saved locally and uploaded! File ID: {file_id}")
                     except Exception as e:
                         st.error(f"Error uploading to Google Drive: {e}")
-
 else:
     st.error("Enter a name first.")
 
-# -------------------------- SIDEBAR STATUS --------------------------
+# SIDEBAR STATUS
 st.sidebar.header("Dataset Status")
 if st.session_state['person_name']:
     st.sidebar.write("Person:", st.session_state['person_name'])
