@@ -37,7 +37,7 @@ def authenticate_drive():
         }
     }
     
-    gauth.LocalWebserverAuth()  # opens OAuth link for user in browser
+    gauth.CommandLineAuth()  # opens OAuth link for user in browser
     drive = GoogleDrive(gauth)
     return drive
 
