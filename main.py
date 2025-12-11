@@ -31,7 +31,7 @@ def authenticate_drive():
         "client_config_backend": "settings",
         "client_config": {
             "client_id": st.secrets["gdrive_oauth"]["client_id"],
-            "client_secret": st.secrets["gdrive_oauth"]["client_secret"],
+            "client_secret": st.secrets["auth_client"]["client_secret"],
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token"
         },
