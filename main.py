@@ -34,10 +34,13 @@ def authenticate_drive():
             "client_secret": st.secrets["gdrive_oauth"]["client_secret"],
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token"
-        }
+        },
+        "save_credentials": True,
+        "save_credentials_backend": "file",
+        "save_credentials_file": "credentials.json"
     }
     
-    gauth.CommandLineAuth()  # opens OAuth link for user in browser
+    gauth.LocalWebserverAuth()  # opens OAuth link for user in browser
     drive = GoogleDrive(gauth)
     return drive
 
